@@ -6,9 +6,10 @@ $variant = [2,3,4];
 $x = [0,1,2];
 $twos = [0,1,2];
 $r = 1;
-$n = 55;
+$n = 42;
 $temperature = 2;
 $cold_constant = 0.95;
+
 
 $full_code = generateFullCode($characters);
 //echo toStringCode($full_code);die;
@@ -17,93 +18,91 @@ $conditioned_code = generateConditionedCode($full_code, $variant, $x, $twos);
 
 $start_time = time();
 
-//do {
-    ob_start();
+ob_start();
 
-    $initial_covering_code = generateCoveringCode($n, $r, $full_code);
-    //echo toStringCoveringCode($initial_covering_code);die;
+$initial_covering_code = generateCoveringCode($n, $r, $full_code);
+//echo toStringCoveringCode($initial_covering_code);die;
 
-    $covering_code = simulatedAnnealing($initial_covering_code, $conditioned_code, $r, $temperature, $cold_constant);
+$covering_code = simulatedAnnealing($initial_covering_code, $full_code, $conditioned_code, $r, $temperature, $cold_constant);
 
-    ob_end_flush();
-
-//}while($covering_code === false);
+ob_end_flush();
 
 $end_time = time();
 
 echo "----- SOLUCIÓN -----".PHP_EOL;
-echo toStringCoveringCode($covering_code);
-echo "Conditioned Uncovering: ". countUncoveringWords($covering_code['uncovering'], $conditioned_code).PHP_EOL;
+echo toStringCoveringCode($covering_code, $conditioned_code);
+echo "Conditioned Uncovering: ". sizeof(getUncoveringWords($covering_code, $conditioned_code)).PHP_EOL;
+echo "Total Uncovering: ". sizeof(getUncoveringWords($covering_code, $full_code)).PHP_EOL;
+
+echo "Total Covered: ". sizeof(getCoveredWords($covering_code)).PHP_EOL;
 
 echo 'START TIME:'.$start_time.PHP_EOL;
 echo 'END TIME:'.$end_time.PHP_EOL;
 echo 'TOTAL TIME:'.($end_time-$start_time).'s'.PHP_EOL;
 
 //Algoritmo de recocido simulado para la obtención de un código de recubrimiento óptimo
-function simulatedAnnealing($covering_code, $conditioned_code, $r, $temperature, $cold_constant)
+function simulatedAnnealing($covering_code, $code, $conditioned_code, $r, $temperature, $cold_constant)
 {
 
-    //Variable para controlar cuando se queda estancado y volver a relanzar
-    $count = 0;
-    $limit_count = 10000;
-
-    $uncovering = $covering_code['uncovering'];
-    $covering = $covering_code['covering'];
-
     //Obtenemos el número de apuestas del espacio condicionado que ha quedado sin recubrir con el código inicial
-    $n = countUncoveringWords($uncovering, $conditioned_code);
+    $n = sizeof(getUncoveringWords($covering_code, $conditioned_code));
 
     //Se repite el algoritmo mientras n sea mayor de 0
-    while ($n > 0 && $count <= $limit_count)
+    while ($n > 0)
     {
         //Recorremos todas las bolas
-        foreach ($covering as $it_group => &$group)
+        foreach ($covering_code as $it_group => $group)
         {
             //Vamos a repetir el proceso 5 veces por bola
             for ($i=0; $i<5; $i++)
             {
-                //Obtenemos una apuesta aleatoria del conjunto
-                if ($group['words'])
-                {
+
+                //Obtenemos una apuesta aleatoria del conjunto que no sea ya centro de otra bola
+                do {
                     $random_word_it = array_rand($group['words']);
                     $random_word = $group['words'][$random_word_it];
 
-                    //Volvemos a generar el contenido de la bola con este nuevo centro
-                    $group_words = regenerateGroupWords($group, $random_word, $uncovering, $r);
-
-                    //Volvemos a comprobar n para el nuevo conjunto sin recubrir
-                    $n_partial = countUncoveringWords($group_words['uncovering'], $conditioned_code);
-
-                    //Se acepta el resultado si el nuevo n es menor o igual que el anterior o si se cumple la condición de probabilidad con la temperatura
-                    $acepta = 0;
-                    if ($n_partial <= $n)
-                        $acepta = 1;
-                    else
+                    $is_center = false;
+                    foreach ($covering_code as $g)
                     {
-                        $probability = exp(((-1*$n_partial)-$n)/$temperature);
-                        $random = rand(0, 10) / 1000;
-                        if ($random<$probability)
-                            $acepta = 2;
+                        if ($g['center'] == $random_word)
+                        {
+                            $is_center = true;
+                            break;
+                        }
                     }
 
-                    if ($acepta > 0)
-                    {
-                        $n = $n_partial;
-                        $group = reset($group_words['covering']);
-                        $uncovering = $group_words['uncovering'];
-                    }
+                } while ($is_center);
 
-                    //Si el nuevo n es igual al anterior incrementamos el contador, si no, se reinicia
-                    if ($n < $n_partial)
-                        $count ++;
-                    else
-                        $count = 0;
-                    echo 'Count: '.$count.PHP_EOL;
-                    ob_flush();
+                //Volvemos a generar el contenido de la bola con este nuevo centro
+                $new_covering_code = regenerateGroupWords($covering_code, $it_group, $random_word, $r, $code);
 
-                    echo 'BOLA '.$it_group.' It: '.$i.' --- '.(($acepta > 0) ? '(ACEPTA SOLUCIÓN '.(($acepta == 2) ? 'PROBABILIDAD' : '').')' : '').PHP_EOL.'Old:'.$n.PHP_EOL.'New:'.$n_partial.PHP_EOL;
-                    ob_flush();
+                //Volvemos a comprobar n para el nuevo conjunto sin recubrir
+                $n_partial = sizeof(getUncoveringWords($new_covering_code, $conditioned_code));
+
+                //Se acepta el resultado si el nuevo n es menor o igual que el anterior o si se cumple la condición de probabilidad con la temperatura
+                $acepta = 0;
+                if ($n_partial <= $n)
+                    $acepta = 1;
+                else
+                {
+                    $probability = exp((-1*($n_partial-$n))/$temperature);
+                    $random = rand(0, 10) / 10;
+                    if ($random<$probability)
+                        $acepta = 2;
                 }
+
+                if ($acepta > 0)
+                {
+                    $n = $n_partial;
+                    $group = $new_covering_code[$it_group];
+                    $covering_code[$it_group] = $new_covering_code[$it_group];
+                }
+
+                echo 'BOLA '.$it_group.' It: '.$i.' --- '.(($acepta > 0) ? '(ACEPTA SOLUCIÓN '.(($acepta == 2) ? 'PROBABILIDAD' : '').')' : '').PHP_EOL.
+                    'Old:'.$n.PHP_EOL.
+                    'New:'.$n_partial.PHP_EOL;
+                ob_flush();
             }
         }
 
@@ -111,48 +110,62 @@ function simulatedAnnealing($covering_code, $conditioned_code, $r, $temperature,
          $temperature = $temperature * $cold_constant;
     }
 
-    if ($count >= $limit_count)
-    {
-        echo 'Máximo de iteraciones alcanzado ('.$count.')'.PHP_EOL;
-        echo toStringCoveringCode(['covering' => $covering, 'uncovering' => $uncovering]);die;
-        ob_flush();
-        return false;
-    }
-
-    return ['covering' => $covering, 'uncovering' => $uncovering];
+    return $covering_code;
 }
 
 //Función que regenera el contenido de una bola con su nuevo centro
-function regenerateGroupWords($group, $new_center_word, $uncovering, $r)
+function regenerateGroupWords($covering_code, $it_group, $new_center_word, $r, $code)
 {
-    //Introducimos el antiguo centro y las palabras de la antigua bola en el conjunto sin recubrir
-    $uncovering[] = $group['center'];
-    foreach ($group['words'] as $word)
-        $uncovering[] = $word;
-    $group['words'] = [];
-
-    //Asignamos el nuevo centro y lo eliminamos del conjunto sin recubrir
-    $group['center'] = $new_center_word;
-    $it = array_search($new_center_word, $uncovering);
-    unset($uncovering[$it]);
+    //Asignamos el nuevo centro al grupo y eliminamos sus palabras
+    $covering_code[$it_group]['center'] = $new_center_word;
+    $covering_code[$it_group]['words'] = [];
 
     //Regeneramos el contenido de la bola con el nuevo centro
-    $group_words = fillGroupWords(['covering' => [$group]], $uncovering, $r);
+    $new_group = fillGroupWords([$covering_code[$it_group]], $code, $r);
+    $covering_code[$it_group] = reset($new_group);
 
-    return $group_words;
+    return $covering_code;
 }
 
 //Función que obtiene el número de apuestas de un conjunto que han quedado sin recubrir
-function countUncoveringWords($uncovering_words, $conditioned_code)
+function getUncoveringWords($covering_code, $code)
 {
-    $n = 0;
-    foreach ($conditioned_code as $word)
+    $uncovering_words = [];
+    foreach ($code as $word)
     {
-        if (in_array($word, $uncovering_words))
-            $n ++;
+        $exists = false;
+        foreach ($covering_code as $covering_center)
+        {
+            if (in_array($word, $covering_center['words']) || $word == $covering_center['center'])
+            {
+                $exists = true;
+                break;
+            }
+        }
+
+        if (!$exists && !in_array($word, $uncovering_words))
+            $uncovering_words[] = $word;
     }
 
-    return $n;
+    return $uncovering_words;
+}
+
+function getCoveredWords($covering_code)
+{
+    $covered_words = [];
+    foreach ($covering_code as $group)
+    {
+        if (!in_array($group['center'], $covered_words))
+            $covered_words[] = $group['center'];
+
+        foreach ($group['words'] as $word)
+        {
+            if (!in_array($word, $covered_words))
+                $covered_words[] = $word;
+        }
+
+    }
+    return $covered_words;
 }
 
 //Función que genera el código del conjunto completo de 6 triples
@@ -224,15 +237,14 @@ function generateConditionedCode($code, $variant, $x, $twos)
 function generateCoveringCode($n, $r, $code)
 {
     //echo sizeof($code).'---';
-    $groups = ['covering' => [], 'unconvering' => []];
+    $groups = [];
 
     //Seleccionamos n centros aleatorios
     for ($i=0;$i<$n;$i++)
     {
         $random_int = array_rand($code);
         $center = $code[$random_int];
-        unset($code[$random_int]);
-        $groups['covering'][] = ['center' => $center, 'words' => []];
+        $groups[] = ['center' => $center, 'words' => []];
     }
 
     //Rellenamos las bolas
@@ -246,7 +258,7 @@ function generateCoveringCode($n, $r, $code)
 function fillGroupWords($groups, $code, $r)
 {
 
-    foreach ($groups['covering'] as &$group)
+    foreach ($groups as $it_group => $group)
     {
         foreach ($code as $it_code => $word)
         {
@@ -261,16 +273,10 @@ function fillGroupWords($groups, $code, $r)
                 }
             }
 
-            if ($distance <= $r)
-            {
-                $group['words'][] = $word;
-                unset($code[$it_code]);
-            }
+            if ($distance != 0 && $distance <= $r)
+                $groups[$it_group]['words'][] = $word;
         }
     }
-
-    //Agrupamos las palabras que quedan sin recubrir
-    $groups['uncovering'] = $code;
 
     return $groups;
 }
@@ -285,24 +291,16 @@ function toStringCode($code)
 }
 
 //Convierte a cadena de texto la estructura de datos del código de recubrimiento
-function toStringCoveringCode($code)
+function toStringCoveringCode($code, $conditioned_code)
 {
     $str = '';
     $str .= '---- COVERING ----'.PHP_EOL;
-    $count_words = 0;
-    foreach ($code['covering'] as $it => $data)
+    foreach ($code as $it => $data)
     {
-        $count_words += sizeof($data['words'])+1;
-        $str .= 'Group '.($it+1).' ('.(sizeof($data['words'])+1).')'.PHP_EOL;
+        $str .= 'Group '.($it+1).' ('.(sizeof($data['words'])).')'.PHP_EOL;
         $str .= '---- Center: '.toStringWord($data['center']).PHP_EOL;
         $str .= '---- Words: '.toStringCode($data['words']).PHP_EOL;
     }
-
-    $str .= '---- UNCOVERING ('.sizeof($code['uncovering']).') ----'.PHP_EOL;
-    $str .= toStringCode($code['uncovering']).PHP_EOL;
-
-    $count_words += sizeof($code['uncovering']);
-    $str .= 'Count words: '.$count_words.PHP_EOL;
 
     return $str.PHP_EOL;
 }
