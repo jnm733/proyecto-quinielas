@@ -6,7 +6,7 @@ $variant = [2,3,4];
 $x = [0,1,2];
 $twos = [0,1,2];
 $r = 1;
-$n = 42;
+$n = 40;
 $temperature = 2;
 $cold_constant = 0.95;
 
